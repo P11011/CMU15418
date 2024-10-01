@@ -239,7 +239,7 @@ void clampedExpSerial(float* values, int* exponents, float* output, int N) {
     }
   }
 }
-
+//思路来源:https://rioblog.fun/blog/cs149/  补充了些自己理解的注释
 void clampedExpVector(float* values, int* exponents, float* output, int N) {
 
   //
@@ -248,8 +248,62 @@ void clampedExpVector(float* values, int* exponents, float* output, int N) {
   //
   // Your solution should work for any value of
   // N and VECTOR_WIDTH, not just when VECTOR_WIDTH divides N
-  //
   
+  // 初始化
+  __cs149_vec_float x; 
+  __cs149_vec_int y;
+  __cs149_vec_float result;
+  __cs149_vec_int allOneInt = _cs149_vset_int(1);
+  __cs149_vec_int zeroInt = _cs149_vset_int(0);
+  __cs149_vec_float maxVal = _cs149_vset_float(9.999999f);
+  __cs149_mask maskAll, maskIsNotZero, maskIsZero;
+
+  for (int i = 0; i < N; i += VECTOR_WIDTH)
+  {
+    if (i + VECTOR_WIDTH > N) // 因为N不一定被 VECTOR_WIDTH 整除，
+                              //最后一次可能只有部分位需要除处理，不处理部分置 0 覆盖
+    {
+      maskAll = _cs149_init_ones(N - i);
+    }
+    else
+    {
+      maskAll = _cs149_init_ones();// 全置为 1 ,都需要进行操作
+    }
+
+    maskIsZero = _cs149_init_ones(0);// 初始化变量 0
+    
+    _cs149_vload_float(x, values + i, maskAll); // x = values[i]; 这里只对 maskALL 为 1 的为进行赋值，
+                                                // 下面同理，只对为 1 位进行对应操作
+    _cs149_vmove_float(result, x, maskAll);     // result = x
+    _cs149_vload_int(y, exponents + i, maskAll); // y = exponents[i];
+
+    _cs149_veq_int(maskIsZero, y, zeroInt, maskAll); // if (y == 0) { maskIsZero = maskAll }
+    _cs149_vset_float(result, 1.f, maskIsZero);      //  result = 1.f; 按 maskIsZero 值判定是否执行
+                                                     // 这两行等价于 if ( y == 0){ result = 1.f}
+
+    maskIsNotZero = _cs149_mask_not(maskIsZero); // maskIsNotZero = 取反 (maskIsZero)，
+                                                 // maskIsZero存储哪些位是0(排除了不需要计算的位), maskIsNotZero则存储哪些不是0
+
+    while (1)
+    {
+      _cs149_vsub_int(y, y, allOneInt, maskIsNotZero); // count = y - 1
+
+      _cs149_vgt_int(maskIsNotZero, y, zeroInt, maskIsNotZero); // if (count > 0) { maskIsNotZero = maskIsNotZero}
+                                                                //  else { maskIsNotZero = 0}
+      int num = _cs149_cntbits(maskIsNotZero);
+      if (num == 0)
+      {
+        break;
+      }
+      _cs149_vmult_float(result, result, x, maskIsNotZero); //   resulte *= x;
+    }
+
+    maskIsZero = _cs149_init_ones(0);
+    _cs149_vgt_float(maskIsZero, result, maxVal, maskAll); // if (result > 9.999999f) {
+    _cs149_vset_float(result, 9.999999f, maskIsZero);      //   result = 9.999999f;
+
+    _cs149_vstore_float(output + i, result, maskAll); // output[i] = result
+  }
 }
 
 // returns the sum of all elements in values
@@ -270,10 +324,21 @@ float arraySumVector(float* values, int N) {
   //
   // CS149 STUDENTS TODO: Implement your vectorized version of arraySumSerial here
   //
-  
+  __cs149_mask maskAll = _cs149_init_ones(); // mask all
+  __cs149_vec_float sum = _cs149_vset_float(0.f);
+  __cs149_vec_float temp;
   for (int i=0; i<N; i+=VECTOR_WIDTH) {
-
+   _cs149_vload_float(temp, values + i, maskAll); // temp =values[i]
+   _cs149_vadd_float(sum, sum, temp, maskAll); // sum += tmp
   }
+  int i = VECTOR_WIDTH;
+  while (i /= 2) { //每次减少一半，通过下面两个操作，使得每次每个数变成两个数的和并减少一半长度
+    _cs149_hadd_float(sum, sum); // 将每个元素变成相邻两数和
+    _cs149_interleave_float(sum, sum); // 按奇偶位分为左右部分重新排序 
+  }
+  float output[VECTOR_WIDTH];
+  _cs149_vstore_float(output, sum, maskAll);
+  return output[0];
 
   return 0.0;
 }
