@@ -34,8 +34,23 @@ int main() {
         // to you generate best and worse-case speedups
         
         // starter code populates array with random input values
-        values[i] = .001f + 2.998f * static_cast<float>(rand()) / RAND_MAX;
+        if (i % 8 == 0){
+		values[i] = 2.999f; //因为带宽一次性执行8个，我们将第一个放特别慢的数据能增大相邻数据计算量，降低加速比
+	}
+        else{
+		values[i] = 1.f;
+	}
     }
+
+//因为main将任务划分成64个task，只限定第一个task有慢数据会让其他执行task的线程空闲等，降低加速比
+//    for (int i=0; i<N; i++){
+//        values[i] = 1.0f;
+//    }
+//    for (int i=0; i<N/64; i++){
+//        if (i % 8 == 0) {
+//            values[i] = 2.999f;
+//        }
+//    }
 
     // generate a gold version to check results
     for (unsigned int i=0; i<N; i++)
