@@ -2735,7 +2735,7 @@ __global__ void convolve(int N, float* input, float* output) {
 
 ### 5.3 Test-and-Test-and-Set 锁
 
-- 在 Test-and-Set 基础上增加额外的检查步骤，以减少总线上的一致性流量。
+- 在 Test-and-Set 基础上增加额外的检查步骤，以减少总线上的一致性流量（test_and_set会锁定总线）。
 
   ```
   void Lock(int* lock) {
@@ -2746,7 +2746,7 @@ __global__ void convolve(int N, float* input, float* output) {
   }
   ```
 
-  - **优点**：在等待期间主要在本地缓存中进行检查（lock值存储在本地缓存），减少了一致性流量。
+  - **优点**：在等待期间主要在本地缓存中进行检查（lock值存储在主存，但也会缓存在本地一个备份用于缓存一致性协议保证其缓存的正确），减少了一致性流量。
   - **缺点**：在无争用情况下延迟略高。
 
 ### 5.4 带退避的 Test-and-Set 锁（Back-off）
@@ -2946,7 +2946,7 @@ __global__ void convolve(int N, float* input, float* output) {
 
 ## 3. 细粒度同步的锁实现
 ### 3.1 用 `compare_and_swap` 实现的锁
-- `compare_and_swap`（CAS）是一种原子操作，能够比较内存中的值，如果相等则交换值。
+- `compare_and_swap`（CAS）是一种原子操作（会锁定总线），能够比较内存中的值，如果相等则交换值。
 - 利用 CAS 可以实现简单的锁机制：
   ```cpp
   typedef int Lock;
@@ -3049,12 +3049,30 @@ __global__ void convolve(int N, float* input, float* output) {
   }
   ```
 
-  - **注意**：这种实现方式存在**ABA 问题**，即栈顶指针在某线程读取后，可能经过若干次变化又回到原值，导致错误判断。
+  - **注意**：这种实现方式存在**ABA 问题**，即栈顶指针在某线程读取后，可能经过若干次变化又回到原值，导致错误判断（ABA 问题发生的原因是 **CAS** 仅比较值是否等于预期值，而并不追踪数据在这期间是否经过其他变化。因此，当栈顶的值从 **A -> B->C-> A** 发生变化后，CAS 认为栈顶没有变化（因为它的值又变回来了）从而导致 if (compare_and_swap(&s->top, old_top, new_top) == old_top)为true，但此时new_top的值还是之前的B，而不是C导致出错）。
 
 ### 5.3 解决 ABA 问题的方法
 
 - **引入计数器**：为栈顶维护一个计数器，每次修改栈顶时增加计数，通过双重比较交换（`double compare_and_swap`）来同时检查指针和计数器，确保数据一致性。
+
 - **Hazard Pointer**：使用**危险指针**（Hazard Pointer）来跟踪每个线程正在访问的节点，避免其他线程释放这些节点。
+
+  **Hazard Pointer（危险指针）**：一种用于实现**无锁数据结构**时的内存管理技术，旨在解决并发编程中使用**无锁算法**时的内存安全问题。它主要用于避免线程之间在释放共享资源时产生的**悬空指针**（dangling pointer）问题，即一个线程在访问某个节点时，另一个线程可能会将该节点释放掉，导致前一个线程访问到非法内存。这种技术确保了在并发环境中，某个节点不会被其他线程释放直到所有对它的使用都结束。
+
+  **线程注册危险指针**：
+
+  - 当一个线程准备访问某个共享节点（例如，准备通过 `CAS` 更新某个节点的指针），它会将该节点的地址存储到它的**危险指针**中，表示该节点对当前线程是“危险的”。
+  - 这样，如果有其他线程想要释放这个节点，它会知道该节点当前处于访问中，不应该被释放。
+
+  **检查危险指针**：
+
+  - 在进行节点的释放操作之前，线程会遍历所有的**危险指针列表**，检查是否有其他线程将该节点标记为正在使用。
+  - 如果节点的地址出现在某个线程的危险指针中，说明该节点仍然在被访问，因此释放操作会被推迟，直到没有线程标记该节点。
+
+  **安全地释放节点**：
+
+  - 如果某个节点的地址没有出现在任何危险指针中，则说明当前没有线程在使用该节点，可以安全地进行释放。
+  - 这种机制确保了节点在没有线程使用时才能被释放，避免了悬空指针问题。
 
 ------
 
@@ -3079,12 +3097,10 @@ __global__ void convolve(int N, float* input, float* output) {
 
 - **Harris (2001)**: 对无锁链表的实际实现进行了探讨。
 
-- 相关博客和文章
-
-  ：
+- 相关博客和文章：
 
   - [Lock-Free Code: A False Sense of Security](http://www.drdobbs.com/cpp/lock-free-code-a-false-sense-of-security/210600279)
-  - [Common Pitfalls in Writing Lock-Free Algorithms](http://developers.memsql.com/blog/common-pitfalls-in-writing-lock-free-algorithms/)
+- [Common Pitfalls in Writing Lock-Free Algorithms](http://developers.memsql.com/blog/common-pitfalls-in-writing-lock-free-algorithms/)
 
 
 
