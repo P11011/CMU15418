@@ -1,5 +1,5 @@
 #include "tasksys.h"
-
+#include<thread>
 
 IRunnable::~IRunnable() {}
 
@@ -113,10 +113,20 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
     // method in Part A.  The implementation provided below runs all
     // tasks sequentially on the calling thread.
     //
-
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
+    int num_threads = 8;
+    std::thread* threads = new std::thread[8];
+    for (int i = 0; i < num_threads; i++) {
+        threads[i] = std::thread([this, runnable, i, num_total_tasks, num_threads]() {
+            for(int tid = i; tid < num_total_tasks; tid += num_threads) {
+                runnable->runTask(tid, num_total_tasks);
+            }
+        });
     }
+    
+    for (int i = 0; i < num_threads; i++) {
+        threads[i].join();
+    }
+    delete[] threads;
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
